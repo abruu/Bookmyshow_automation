@@ -9,7 +9,8 @@
     "notifications",
     "tabs",
     "activeTab",
-    "scripting"
+    "scripting",
+    "commands"
   ],
   "host_permissions": ["https://in.bookmyshow.com/*"],
   "action": {
@@ -33,5 +34,13 @@
     "16": "images/icon16.png",
     "48": "images/icon48.png",
     "128": "images/icon128.png"
+  },
+  "commands": {
+    "stop-monitoring": {
+      "suggested_key": {
+        "default": "Alt+S"
+      },
+      "description": "Stop monitoring for movies"
+    }
   }
 }

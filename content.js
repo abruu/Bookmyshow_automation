@@ -226,7 +226,6 @@ function createCountdownTimer() {
     z-index: 2147483647;
     box-shadow: 0 4px 12px rgba(0,0,0,0.5);
     font-size: 16px;
-    pointer-events: none;
     font-family: Arial, sans-serif;
     border: 2px solid #ff9800;
     text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
@@ -234,8 +233,55 @@ function createCountdownTimer() {
     will-change: transform;
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);
+    min-width: 220px;
   `;
   document.body.appendChild(timer);
+
+  // Add a stop button to the timer
+  const stopButton = document.createElement("button");
+  stopButton.textContent = "Stop Monitoring";
+  stopButton.style.cssText = `
+    display: block;
+    margin-top: 10px;
+    background-color: #f44336;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-weight: bold;
+    cursor: pointer;
+    width: 100%;
+    transition: background-color 0.2s;
+    pointer-events: auto;
+  `;
+
+  // Add hover effect
+  stopButton.addEventListener("mouseover", () => {
+    stopButton.style.backgroundColor = "#d32f2f";
+  });
+
+  stopButton.addEventListener("mouseout", () => {
+    stopButton.style.backgroundColor = "#f44336";
+  });
+
+  // Add click handler to stop monitoring
+  stopButton.addEventListener("click", () => {
+    console.log("Stop button clicked in content script");
+
+    // Send message to background script to stop monitoring
+    chrome.runtime.sendMessage({ action: "stopMonitoring" }, (response) => {
+      if (response && response.success) {
+        console.log(
+          "Successfully stopped monitoring from content script button"
+        );
+        // The background script will handle the rest
+      } else {
+        console.error("Failed to stop monitoring from content script button");
+        // Try to stop locally too
+        stopAllMonitoring();
+      }
+    });
+  });
 
   // Update countdown
   let timeLeft = nextRefreshIn;
@@ -250,7 +296,8 @@ function createCountdownTimer() {
     if (isMonitoring) {
       const minutes = Math.floor(timeLeft / 60);
       const seconds = timeLeft % 60;
-      timer.innerHTML = `
+
+      let timerContent = `
         <div style="margin-bottom: 4px; color: #ff9800;">BookMyShow Monitor</div>
         Next refresh in:
         <span style="color: #4caf50; font-size: 18px;">
@@ -264,7 +311,14 @@ function createCountdownTimer() {
               : ""
           }
         </div>
+        <div style="font-size: 11px; margin-top: 5px; color: #aaa;">
+          Press Alt+S to stop monitoring
+        </div>
       `;
+
+      timer.innerHTML = timerContent;
+      timer.appendChild(stopButton);
+
       timeLeft--;
       if (timeLeft < 0) {
         timeLeft = nextRefreshIn;
@@ -296,6 +350,73 @@ function createCountdownTimer() {
   // Also ensure visibility when page changes
   document.addEventListener("scroll", ensureTimerVisibility);
   document.addEventListener("resize", ensureTimerVisibility);
+}
+
+// Function to create an emergency stop button
+function createEmergencyStopButton() {
+  // Remove existing button if any
+  const existingButton = document.getElementById("bms-emergency-stop");
+  if (existingButton) {
+    existingButton.remove();
+  }
+
+  // Create the button
+  const emergencyButton = document.createElement("button");
+  emergencyButton.id = "bms-emergency-stop";
+  emergencyButton.textContent = "⚠️ STOP";
+  emergencyButton.title = "Emergency Stop Monitoring";
+  emergencyButton.style.cssText = `
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background-color: rgba(244, 67, 54, 0.9);
+    color: white;
+    border: 2px solid #fff;
+    border-radius: 50px;
+    padding: 8px 16px;
+    font-weight: bold;
+    cursor: pointer;
+    z-index: 2147483647;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    font-size: 14px;
+    font-family: Arial, sans-serif;
+    transition: all 0.3s;
+    transform: translateZ(0);
+    pointer-events: auto;
+    opacity: 0.8;
+  `;
+
+  // Add hover effects
+  emergencyButton.addEventListener("mouseover", () => {
+    emergencyButton.style.opacity = "1";
+    emergencyButton.style.transform = "scale(1.1)";
+  });
+
+  emergencyButton.addEventListener("mouseout", () => {
+    emergencyButton.style.opacity = "0.8";
+    emergencyButton.style.transform = "scale(1)";
+  });
+
+  // Add click handler
+  emergencyButton.addEventListener("click", () => {
+    console.log("Emergency stop button clicked");
+
+    // Send message to background script to stop monitoring
+    chrome.runtime.sendMessage({ action: "stopMonitoring" }, (response) => {
+      if (response && response.success) {
+        alert("BookMyShow monitoring has been stopped successfully!");
+        console.log("Successfully stopped monitoring from emergency button");
+        // The background script will handle the rest
+      } else {
+        console.error("Failed to stop monitoring from emergency button");
+        // Try to stop locally too
+        stopAllMonitoring();
+        alert("BookMyShow monitoring has been stopped locally!");
+      }
+    });
+  });
+
+  document.body.appendChild(emergencyButton);
 }
 
 // Start periodic checks for changes
@@ -335,6 +456,9 @@ function startPeriodicChecks() {
   // Create countdown timer
   createCountdownTimer();
 
+  // Create emergency stop button
+  createEmergencyStopButton();
+
   // Log the monitoring state to verify
   console.log("Monitoring activated: ", {
     isMonitoring: isMonitoring,
@@ -366,6 +490,17 @@ function stopAllMonitoring() {
   if (timer) {
     timer.textContent = "Monitoring stopped";
   }
+
+  // Remove the emergency stop button
+  const emergencyButton = document.getElementById("bms-emergency-stop");
+  if (emergencyButton) {
+    emergencyButton.remove();
+  }
+
+  // Remove any localStorage flags about movies found
+  localStorage.removeItem("bms_movie_found");
+  localStorage.removeItem("bms_movie_name");
+  localStorage.removeItem("bms_format_info");
 
   // Clear any other monitoring resources
   movieNameToFind = "";

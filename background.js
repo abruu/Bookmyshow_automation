@@ -57,13 +57,36 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     console.log("Movie found:", request.data);
 
     // Focus the tab and window where the movie was found
-    chrome.windows.update(sender.tab.windowId, { focused: true }, () => {
-      chrome.tabs.update(sender.tab.id, { active: true }, () => {
-        // Play notification sound and show notification after focusing
-        playNotificationSound();
-        showNotification(request.data.movieName, request.data.formatInfo);
+    try {
+      chrome.windows.update(sender.tab.windowId, { focused: true }, () => {
+        if (chrome.runtime.lastError) {
+          console.error(
+            "Error focusing window:",
+            chrome.runtime.lastError.message
+          );
+          return;
+        }
+
+        chrome.tabs.update(sender.tab.id, { active: true }, () => {
+          if (chrome.runtime.lastError) {
+            console.error(
+              "Error focusing tab:",
+              chrome.runtime.lastError.message
+            );
+            return;
+          }
+
+          // Play notification sound and show notification after focusing
+          playNotificationSound();
+          showNotification(request.data.movieName, request.data.formatInfo);
+        });
       });
-    });
+    } catch (error) {
+      console.error("Error when focusing tab/window:", error);
+      // Still try to show notification even if focusing fails
+      playNotificationSound();
+      showNotification(request.data.movieName, request.data.formatInfo);
+    }
   } else if (request.action === "forceTabFocus") {
     console.log("Force focusing tab because movie was found:", request.data);
 
@@ -81,13 +104,43 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       );
 
       // Always force the window and tab to the front when a movie is found
-      chrome.windows.update(targetTab.windowId, { focused: true }, () => {
-        chrome.tabs.update(targetTab.id, { active: true }, () => {
-          console.log(
-            `Tab and window focus attempt ${attemptCount + 1} completed`
-          );
+      try {
+        // First check if the tab still exists
+        chrome.tabs.get(targetTab.id, (tab) => {
+          if (chrome.runtime.lastError) {
+            console.error(
+              "Tab no longer exists:",
+              chrome.runtime.lastError.message
+            );
+            return; // Skip this attempt if tab doesn't exist
+          }
+
+          chrome.windows.update(targetTab.windowId, { focused: true }, () => {
+            if (chrome.runtime.lastError) {
+              console.error(
+                "Error focusing window:",
+                chrome.runtime.lastError.message
+              );
+              // Still try to focus the tab even if window focus fails
+            }
+
+            chrome.tabs.update(targetTab.id, { active: true }, () => {
+              if (chrome.runtime.lastError) {
+                console.error(
+                  "Error focusing tab:",
+                  chrome.runtime.lastError.message
+                );
+              } else {
+                console.log(
+                  `Tab and window focus attempt ${attemptCount + 1} completed`
+                );
+              }
+            });
+          });
         });
-      });
+      } catch (error) {
+        console.error("Error in focus attempt:", error);
+      }
 
       attemptCount++;
       if (attemptCount < focusAttempts) {
@@ -99,17 +152,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     // Start the focus attempts
     attemptFocus();
 
-    // Play notification sound to alert the user
-    try {
-      const audio = new Audio("notification.mp3");
-      audio.play().catch((err) => {
-        console.log("Could not play notification sound:", err);
-      });
-    } catch (error) {
-      console.log("Error with notification sound:", error);
-    }
+    // Play notification sound to alert the user - use the function
+    playNotificationSound();
 
-    // Show a notification
+    // Show a notification with both "View Now" and "Stop Monitoring" buttons
     chrome.notifications.create({
       type: "basic",
       iconUrl: "images/icon128.png",
@@ -120,13 +166,32 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           : "the selected format"
       }!`,
       priority: 2,
-      buttons: [{ title: "View Now" }],
+      buttons: [{ title: "View Now" }, { title: "Stop Monitoring" }],
     });
   } else if (request.action === "focusTab") {
     // Focus the window first, then the tab
-    chrome.windows.update(sender.tab.windowId, { focused: true }, () => {
-      chrome.tabs.update(sender.tab.id, { active: true });
-    });
+    try {
+      chrome.windows.update(sender.tab.windowId, { focused: true }, () => {
+        if (chrome.runtime.lastError) {
+          console.error(
+            "Error focusing window:",
+            chrome.runtime.lastError.message
+          );
+          return;
+        }
+
+        chrome.tabs.update(sender.tab.id, { active: true }, () => {
+          if (chrome.runtime.lastError) {
+            console.error(
+              "Error focusing tab:",
+              chrome.runtime.lastError.message
+            );
+          }
+        });
+      });
+    } catch (error) {
+      console.error("Error focusing tab/window in focusTab action:", error);
+    }
   }
   return true; // Keep the message channel open for async responses
 });
@@ -194,30 +259,76 @@ async function getCurrentTab() {
 // Function to inject content script into a tab if needed
 function injectContentScriptIfNeeded(tab) {
   try {
+    if (!tab || !tab.id) {
+      console.error(
+        "Invalid tab provided to injectContentScriptIfNeeded:",
+        tab
+      );
+      return;
+    }
+
     // Send a test message to see if content script is already running
     chrome.tabs.sendMessage(tab.id, { action: "ping" }, (response) => {
       if (chrome.runtime.lastError) {
+        console.log(
+          "Content script not detected, injecting:",
+          chrome.runtime.lastError.message
+        );
+
         // Content script is not running, inject it
         chrome.scripting.executeScript(
           {
             target: { tabId: tab.id },
             files: ["content.js"],
           },
-          () => {
+          (results) => {
+            if (chrome.runtime.lastError) {
+              console.error(
+                "Error injecting content script:",
+                chrome.runtime.lastError.message
+              );
+              return;
+            }
+
             console.log("Content script injected into tab:", tab.id);
             // Notify content script to start monitoring
             setTimeout(() => {
-              chrome.tabs.sendMessage(tab.id, { action: "checkMonitoring" });
+              chrome.tabs.sendMessage(
+                tab.id,
+                { action: "checkMonitoring" },
+                (resp) => {
+                  if (chrome.runtime.lastError) {
+                    console.error(
+                      "Error sending checkMonitoring after injection:",
+                      chrome.runtime.lastError.message
+                    );
+                  } else {
+                    console.log("checkMonitoring message sent successfully");
+                  }
+                }
+              );
             }, 500);
           }
         );
       } else {
         // Content script is already running, just send monitoring info
-        chrome.tabs.sendMessage(tab.id, { action: "checkMonitoring" });
+        console.log("Content script already running, sending checkMonitoring");
+        chrome.tabs.sendMessage(
+          tab.id,
+          { action: "checkMonitoring" },
+          (resp) => {
+            if (chrome.runtime.lastError) {
+              console.error(
+                "Error sending checkMonitoring to existing script:",
+                chrome.runtime.lastError.message
+              );
+            }
+          }
+        );
       }
     });
   } catch (error) {
-    console.error("Error injecting content script:", error);
+    console.error("Error checking or injecting content script:", error);
   }
 }
 
@@ -306,13 +417,23 @@ async function refreshBookMyShowPage() {
 
   try {
     // Check if tab still exists
-    const tab = await chrome.tabs.get(targetTab.id).catch(() => null);
+    let tab = null;
+    try {
+      tab = await chrome.tabs.get(targetTab.id);
+    } catch (e) {
+      console.log("Error checking tab existence:", e);
+      tab = null;
+    }
 
     if (!tab) {
       console.log("Target tab no longer exists");
 
       // Tab was closed, stop monitoring or use current active tab
-      chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+      try {
+        const tabs = await chrome.tabs.query({
+          active: true,
+          currentWindow: true,
+        });
         if (tabs && tabs.length > 0) {
           // Use the current active tab
           targetTab = tabs[0];
@@ -330,7 +451,10 @@ async function refreshBookMyShowPage() {
           console.log("No active tab found, stopping monitoring");
           stopMonitoring();
         }
-      });
+      } catch (e) {
+        console.error("Error finding new tab:", e);
+        stopMonitoring();
+      }
       return;
     }
 
@@ -338,12 +462,18 @@ async function refreshBookMyShowPage() {
 
     // Don't focus the tab during regular refresh
     // Just reload it in the background
-    await chrome.tabs.reload(tab.id, { bypassCache: true });
+    try {
+      await chrome.tabs.reload(tab.id, { bypassCache: true });
 
-    // Update last checked time
-    chrome.storage.local.set({
-      lastChecked: new Date().toISOString(),
-    });
+      // Update last checked time
+      chrome.storage.local.set({
+        lastChecked: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.error("Error reloading tab:", e);
+      // If we couldn't reload, maybe the tab was closed just now
+      return;
+    }
 
     // Give the page time to load after refresh, then make sure content script is running
     // and check for movie
@@ -351,52 +481,96 @@ async function refreshBookMyShowPage() {
       if (isMonitoring) {
         console.log("Re-checking content script after page refresh");
 
-        // First ensure the content script is running
-        try {
-          chrome.tabs.sendMessage(tab.id, { action: "ping" }, (response) => {
-            if (chrome.runtime.lastError) {
-              console.log(
-                "Content script not responding after refresh, re-injecting"
-              );
-              chrome.scripting.executeScript(
-                {
-                  target: { tabId: tab.id },
-                  files: ["content.js"],
-                },
-                () => {
-                  console.log("Content script re-injected after refresh");
-                  // Get movie name and format from storage again to ensure consistency
-                  chrome.storage.local.get(
-                    ["movieName", "formatPreference", "refreshInterval"],
-                    (result) => {
-                      if (result.movieName) {
-                        // Wait a moment for script to initialize
-                        setTimeout(() => {
-                          chrome.tabs.sendMessage(tab.id, {
-                            action: "checkMovie",
-                            forceCheck: true,
-                          });
-                        }, 1000);
-                      }
+        // Check if the tab still exists
+        chrome.tabs.get(tab.id, (currentTab) => {
+          if (chrome.runtime.lastError) {
+            console.error(
+              "Tab no longer exists after refresh:",
+              chrome.runtime.lastError.message
+            );
+            return;
+          }
+
+          // First ensure the content script is running
+          try {
+            chrome.tabs.sendMessage(tab.id, { action: "ping" }, (response) => {
+              if (chrome.runtime.lastError) {
+                console.log(
+                  "Content script not responding after refresh, re-injecting"
+                );
+                chrome.scripting.executeScript(
+                  {
+                    target: { tabId: tab.id },
+                    files: ["content.js"],
+                  },
+                  (results) => {
+                    if (chrome.runtime.lastError) {
+                      console.error(
+                        "Error injecting content script after refresh:",
+                        chrome.runtime.lastError.message
+                      );
+                      return;
                     }
-                  );
-                }
-              );
-            } else {
-              console.log(
-                "Content script responded after refresh, telling it to check for movie"
-              );
-              // Content script is active, tell it to check for movie now
-              chrome.tabs.sendMessage(tab.id, {
-                action: "checkMovie",
-                forceCheck: true,
-              });
-            }
-          });
-        } catch (error) {
-          console.error("Error checking content script after refresh:", error);
-          injectContentScriptIfNeeded(tab);
-        }
+
+                    console.log("Content script re-injected after refresh");
+                    // Get movie name and format from storage again to ensure consistency
+                    chrome.storage.local.get(
+                      ["movieName", "formatPreference", "refreshInterval"],
+                      (result) => {
+                        if (result.movieName) {
+                          // Wait a moment for script to initialize
+                          setTimeout(() => {
+                            chrome.tabs.sendMessage(
+                              tab.id,
+                              {
+                                action: "checkMovie",
+                                forceCheck: true,
+                              },
+                              (resp) => {
+                                if (chrome.runtime.lastError) {
+                                  console.error(
+                                    "Error sending checkMovie after injection:",
+                                    chrome.runtime.lastError.message
+                                  );
+                                }
+                              }
+                            );
+                          }, 1000);
+                        }
+                      }
+                    );
+                  }
+                );
+              } else {
+                console.log(
+                  "Content script responded after refresh, telling it to check for movie"
+                );
+                // Content script is active, tell it to check for movie now
+                chrome.tabs.sendMessage(
+                  tab.id,
+                  {
+                    action: "checkMovie",
+                    forceCheck: true,
+                  },
+                  (resp) => {
+                    if (chrome.runtime.lastError) {
+                      console.error(
+                        "Error sending checkMovie to existing script:",
+                        chrome.runtime.lastError.message
+                      );
+                    }
+                  }
+                );
+              }
+            });
+          } catch (error) {
+            console.error(
+              "Error checking content script after refresh:",
+              error
+            );
+            injectContentScriptIfNeeded(tab);
+          }
+        });
       }
     }, 3000);
 
@@ -409,7 +583,11 @@ async function refreshBookMyShowPage() {
 
     // If there's an error and monitoring should continue, try to find a new tab
     if (isMonitoring) {
-      chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+      try {
+        const tabs = await chrome.tabs.query({
+          active: true,
+          currentWindow: true,
+        });
         if (tabs && tabs.length > 0) {
           targetTab = tabs[0];
           console.log(
@@ -420,7 +598,10 @@ async function refreshBookMyShowPage() {
           console.log("No active tab found after error, stopping monitoring");
           stopMonitoring();
         }
-      });
+      } catch (e) {
+        console.error("Error during recovery:", e);
+        stopMonitoring();
+      }
     }
   }
 }
@@ -541,36 +722,118 @@ chrome.notifications.onButtonClicked.addListener(
       // Focus the tab using the persistent approach
       console.log("Notification button clicked, focusing tab:", targetTab.id);
 
-      const focusAttempts = 5; // Try 5 times
-      let attemptCount = 0;
-
-      function attemptFocus() {
-        console.log(
-          `Focus attempt ${attemptCount + 1}/${focusAttempts} for tab:`,
-          targetTab.id
-        );
-
-        // Force the window and tab to the front
-        chrome.windows.update(targetTab.windowId, { focused: true }, () => {
-          chrome.tabs.update(targetTab.id, { active: true }, () => {
-            console.log(
-              `Tab and window focus attempt ${attemptCount + 1} completed`
-            );
+      // First check if the tab still exists
+      chrome.tabs.get(targetTab.id, (tab) => {
+        if (chrome.runtime.lastError) {
+          console.error(
+            "Tab no longer exists:",
+            chrome.runtime.lastError.message
+          );
+          // If the tab doesn't exist, let the user know
+          chrome.notifications.create({
+            type: "basic",
+            iconUrl: "images/icon128.png",
+            title: "Tab Not Found",
+            message:
+              "The BookMyShow tab is no longer available. You may need to restart the monitoring process.",
+            priority: 1,
           });
-        });
-
-        attemptCount++;
-        if (attemptCount < focusAttempts) {
-          // Try again after a short delay
-          setTimeout(attemptFocus, 1000);
+          return;
         }
-      }
 
-      // Start the focus attempts
-      attemptFocus();
+        const focusAttempts = 5; // Try 5 times
+        let attemptCount = 0;
+
+        function attemptFocus() {
+          console.log(
+            `Focus attempt ${attemptCount + 1}/${focusAttempts} for tab:`,
+            targetTab.id
+          );
+
+          // Force the window and tab to the front
+          chrome.windows.update(targetTab.windowId, { focused: true }, () => {
+            if (chrome.runtime.lastError) {
+              console.error(
+                "Error focusing window:",
+                chrome.runtime.lastError.message
+              );
+              // Still try to focus the tab even if window focus fails
+            }
+
+            chrome.tabs.update(targetTab.id, { active: true }, () => {
+              if (chrome.runtime.lastError) {
+                console.error(
+                  "Error focusing tab:",
+                  chrome.runtime.lastError.message
+                );
+              } else {
+                console.log(
+                  `Tab and window focus attempt ${attemptCount + 1} completed`
+                );
+              }
+            });
+          });
+
+          attemptCount++;
+          if (attemptCount < focusAttempts) {
+            // Try again after a short delay
+            setTimeout(attemptFocus, 1000);
+          }
+        }
+
+        // Start the focus attempts
+        attemptFocus();
+      });
+    } else if (buttonIndex === 1) {
+      // Stop Monitoring button clicked
+      console.log("Stop Monitoring button clicked in notification");
+      stopMonitoring();
+
+      // Show confirmation notification
+      chrome.notifications.create({
+        type: "basic",
+        iconUrl: "images/icon128.png",
+        title: "Monitoring Stopped",
+        message: "BookMyShow monitoring has been stopped successfully.",
+        priority: 1,
+      });
     }
   }
 );
+
+// Listen for keyboard shortcuts
+chrome.commands.onCommand.addListener((command) => {
+  if (command === "stop-monitoring") {
+    console.log("Stop monitoring keyboard shortcut (Alt+S) pressed");
+
+    // Stop monitoring
+    stopMonitoring();
+
+    // Show confirmation notification
+    chrome.notifications.create({
+      type: "basic",
+      iconUrl: "images/icon128.png",
+      title: "Monitoring Stopped",
+      message:
+        "BookMyShow monitoring has been stopped using keyboard shortcut (Alt+S).",
+      priority: 1,
+    });
+  }
+});
+
+// Function to show notification
+function showNotification(movieName, formatInfo) {
+  chrome.notifications.create({
+    type: "basic",
+    iconUrl: "images/icon128.png",
+    title: "BookMyShow Movie Alert! 🎬",
+    message: `Found "${movieName}" with ${
+      formatInfo ? formatInfo : "the selected format"
+    }!`,
+    priority: 2,
+    buttons: [{ title: "View Now" }, { title: "Stop Monitoring" }],
+  });
+}
 
 // Function to start monitoring with a specific tab ID
 function startMonitoringWithTab(movieName, formatPreference, interval, tabId) {
@@ -622,6 +885,11 @@ function startMonitoringWithTab(movieName, formatPreference, interval, tabId) {
 
   // Get the specific tab by ID
   chrome.tabs.get(tabId, (tab) => {
+    if (chrome.runtime.lastError) {
+      console.error("Error getting tab:", chrome.runtime.lastError.message);
+      return;
+    }
+
     if (!tab) {
       console.error("Tab with ID", tabId, "not found");
       return;
