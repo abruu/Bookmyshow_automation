@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BookMyShow Movie Finder</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="container">
+      <h1>BookMyShow Movie Finder</h1>
+
+      <form id="setupForm">
+        <div class="form-group">
+          <label for="movieName">Movie Name to Find:</label>
+          <input
+            type="text"
+            id="movieName"
+            placeholder="Enter movie name (e.g. Dune Part Two)"
+            required
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="formatPreference">Format Preference:</label>
+          <select id="formatPreference" required>
+            <option value="ANY">Any Format</option>
+            <option value="2D">2D</option>
+            <option value="3D">3D</option>
+            <option value="IMAX">IMAX</option>
+            <option value="IMAX 2D">IMAX 2D</option>
+            <option value="IMAX 3D">IMAX 3D</option>
+            <option value="4DX">4DX</option>
+            <option value="4DX 2D">4DX 2D</option>
+            <option value="4DX 3D">4DX 3D</option>
+          </select>
+          <small>Extension will highlight the movie name and this format</small>
+        </div>
+
+        <div class="form-group">
+          <label for="movieDate">Select Date:</label>
+          <input type="date" id="movieDate" />
+        </div>
+
+        <div class="form-group">
+          <label for="seatPreference">Seat Preference:</label>
+          <select id="seatPreference">
+            <option value="">Select seat type</option>
+            <option value="VIP">VIP</option>
+            <option value="PRIME">Prime</option>
+            <option value="BALCONY">Balcony</option>
+            <option value="REGULAR">Regular</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="refreshInterval">Refresh Interval (minutes):</label>
+          <input
+            type="number"
+            id="refreshInterval"
+            min="1"
+            max="60"
+            value="1"
+          />
+        </div>
+
+        <div class="form-group checkbox">
+          <input type="checkbox" id="autoBook" />
+          <label for="autoBook">Auto-book when available</label>
+        </div>
+
+        <button type="submit" id="saveBtn">Save Preferences</button>
+      </form>
+
+      <div class="status">
+        <h3>Monitoring Status</h3>
+        <div id="statusMessage">Not monitoring any movie</div>
+        <button id="startMonitoring" class="action-btn">
+          Start Monitoring
+        </button>
+        <button id="stopMonitoring" class="action-btn" disabled>
+          Stop Monitoring
+        </button>
+      </div>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
