@@ -67,35 +67,60 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === "forceTabFocus") {
     console.log("Force focusing tab because movie was found:", request.data);
 
-    // Always force the window and tab to the front when a movie is found
-    chrome.windows.update(sender.tab.windowId, { focused: true }, () => {
-      chrome.tabs.update(sender.tab.id, { active: true }, () => {
-        console.log("Tab and window focused successfully");
+    // Store the tab information to ensure we can focus it again if needed
+    targetTab = sender.tab;
 
-        // Play notification sound to alert the user
-        try {
-          const audio = new Audio("notification.mp3");
-          audio.play().catch((err) => {
-            console.log("Could not play notification sound:", err);
-          });
-        } catch (error) {
-          console.log("Error with notification sound:", error);
-        }
+    // Create a more persistent focus approach - try multiple times
+    const focusAttempts = 5; // Try 5 times
+    let attemptCount = 0;
 
-        // Show a notification
-        chrome.notifications.create({
-          type: "basic",
-          iconUrl: "images/icon128.png",
-          title: "BookMyShow Movie Alert! 🎬",
-          message: `Found "${request.data.movieName}" with ${
-            request.data.formatInfo
-              ? request.data.formatInfo
-              : "the selected format"
-          }!`,
-          priority: 2,
-          buttons: [{ title: "View Now" }],
+    function attemptFocus() {
+      console.log(
+        `Focus attempt ${attemptCount + 1}/${focusAttempts} for tab:`,
+        targetTab.id
+      );
+
+      // Always force the window and tab to the front when a movie is found
+      chrome.windows.update(targetTab.windowId, { focused: true }, () => {
+        chrome.tabs.update(targetTab.id, { active: true }, () => {
+          console.log(
+            `Tab and window focus attempt ${attemptCount + 1} completed`
+          );
         });
       });
+
+      attemptCount++;
+      if (attemptCount < focusAttempts) {
+        // Try again after a short delay
+        setTimeout(attemptFocus, 1000);
+      }
+    }
+
+    // Start the focus attempts
+    attemptFocus();
+
+    // Play notification sound to alert the user
+    try {
+      const audio = new Audio("notification.mp3");
+      audio.play().catch((err) => {
+        console.log("Could not play notification sound:", err);
+      });
+    } catch (error) {
+      console.log("Error with notification sound:", error);
+    }
+
+    // Show a notification
+    chrome.notifications.create({
+      type: "basic",
+      iconUrl: "images/icon128.png",
+      title: "BookMyShow Movie Alert! 🎬",
+      message: `Found "${request.data.movieName}" with ${
+        request.data.formatInfo
+          ? request.data.formatInfo
+          : "the selected format"
+      }!`,
+      priority: 2,
+      buttons: [{ title: "View Now" }],
     });
   } else if (request.action === "focusTab") {
     // Focus the window first, then the tab
@@ -333,7 +358,30 @@ async function refreshBookMyShowPage() {
               console.log(
                 "Content script not responding after refresh, re-injecting"
               );
-              injectContentScriptIfNeeded(tab);
+              chrome.scripting.executeScript(
+                {
+                  target: { tabId: tab.id },
+                  files: ["content.js"],
+                },
+                () => {
+                  console.log("Content script re-injected after refresh");
+                  // Get movie name and format from storage again to ensure consistency
+                  chrome.storage.local.get(
+                    ["movieName", "formatPreference", "refreshInterval"],
+                    (result) => {
+                      if (result.movieName) {
+                        // Wait a moment for script to initialize
+                        setTimeout(() => {
+                          chrome.tabs.sendMessage(tab.id, {
+                            action: "checkMovie",
+                            forceCheck: true,
+                          });
+                        }, 1000);
+                      }
+                    }
+                  );
+                }
+              );
             } else {
               console.log(
                 "Content script responded after refresh, telling it to check for movie"
@@ -490,9 +538,36 @@ function notifyMovieFound(data) {
 chrome.notifications.onButtonClicked.addListener(
   (notificationId, buttonIndex) => {
     if (buttonIndex === 0 && targetTab) {
-      // Focus the tab
-      chrome.tabs.update(targetTab.id, { active: true });
-      chrome.windows.update(targetTab.windowId, { focused: true });
+      // Focus the tab using the persistent approach
+      console.log("Notification button clicked, focusing tab:", targetTab.id);
+
+      const focusAttempts = 5; // Try 5 times
+      let attemptCount = 0;
+
+      function attemptFocus() {
+        console.log(
+          `Focus attempt ${attemptCount + 1}/${focusAttempts} for tab:`,
+          targetTab.id
+        );
+
+        // Force the window and tab to the front
+        chrome.windows.update(targetTab.windowId, { focused: true }, () => {
+          chrome.tabs.update(targetTab.id, { active: true }, () => {
+            console.log(
+              `Tab and window focus attempt ${attemptCount + 1} completed`
+            );
+          });
+        });
+
+        attemptCount++;
+        if (attemptCount < focusAttempts) {
+          // Try again after a short delay
+          setTimeout(attemptFocus, 1000);
+        }
+      }
+
+      // Start the focus attempts
+      attemptFocus();
     }
   }
 );

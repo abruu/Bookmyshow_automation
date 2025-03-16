@@ -44,7 +44,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // Save preferences to storage
   function savePreferences(e) {
-    e.preventDefault();
+    // Only call preventDefault if e exists (if function was called from a form submit event)
+    if (e && e.preventDefault) {
+      e.preventDefault();
+    }
 
     const preferences = {
       movieName: movieNameInput.value,
